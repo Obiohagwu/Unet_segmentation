@@ -1,3 +1,4 @@
+from operator import concat
 from turtle import forward
 import torch 
 import torch.nn as nn
@@ -56,7 +57,7 @@ class UNET(nn.Module):
 
         self.bottleneck = DoubleConv(features[-1], features[-1]*2)
 
-        self.final_conv = nn.Conv2D(features[0], out_channels, kernel_size=1)
+        self.final_conv = nn.Conv2d(features[0], out_channels, kernel_size=1)
 
     
     # Let's implement the forward pass for UNET model
@@ -69,9 +70,44 @@ class UNET(nn.Module):
         for down in self.downs:
             x = down(x)
             skip_connections.append(x)
-            X = self.pool(x)
+            x = self.pool(x)
         
-        X = self.bottleneck(x)
+        x = self.bottleneck(x)
         skip_connections = skip_connections[::-1]
 
+        for idx in range(0, len(self.ups), 2):
+            # This illuistrates the up sampling
+            # up, then double conv, up, then double conv
+            # While also integrating skip connections
+            x = self.ups[idx](x) # up sample
+            skip_connection = skip_connections[idx//2] # get skip connectin
+
+            if x.shape != skip_connection.shape:
+                x = TF.resize(x, size=skip_connection.shape[2:])
+            
+            # Given that the input is ie 161*161, and upon downsamping with 
+            # maxpool, we get floor division by 2 = 80*80, upon upsampling
+            # we are supposed to concatenate input and output with skip connections
+            # we would have to resize output dimension to input to be able to concatenate
+            # via skip connections
+
+            concat_skip = torch.cat((skip_connection, x), dim=1) # For concatenation of skip and upsample
+            x = self.ups[idx+1](concat_skip) # then run it through doubleConv
         
+        return self.final_conv(x)
+
+#print("Testing: Yes, we are good!")        
+
+
+# Now, lets run some mini tests to see how our model works with arbitrary input
+def test():
+    x = torch.randn((3,1,160,160)) # batc_size=3, input_channel=1, input_dim=160*160
+    model = UNET(in_channels=1, out_channels=1)
+    preds = model(x)
+    print(preds.shape)
+    print(x.shape)
+    assert preds.shape == x.shape
+    print("This test is mainly to make sure that our input and output are\n the same dims, such that the skip cnnection concats are good.")
+
+if __name__ == "__main__":
+        test()
